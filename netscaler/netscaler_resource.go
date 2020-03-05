@@ -36,6 +36,35 @@ const (
 	nsErrAuthTimeout    = 1027
 )
 
+// NitroError is custom error type used to handle Nitro exceptions
+type NitroError struct {
+	Errorcode int
+	Message   string
+	Severity  string
+}
+
+func (e *NitroError) Error() string {
+	return fmt.Sprintf("Nitro Error {errorcode: %d, message: %s, severity: %s}", e.Errorcode, e.Message, e.Severity)
+}
+
+func createNitroError(errorcode int, message string, severity string) NitroError {
+	return NitroError{
+		Errorcode: errorcode,
+		Message:   message,
+		Severity:  severity,
+	}
+}
+
+func createNitroErrorFromRespBody(body []byte) (NitroError, error) {
+	var data map[string]interface{}
+	err := json.Unmarshal(body, &data)
+	if err == nil {
+		nitroError := createNitroError(int(data["errorcode"].(float64)), data["message"].(string), data["severity"].(string))
+		return nitroError, nil
+	}
+	return NitroError{}, err
+}
+
 func contains(slice []string, val string) bool {
 	for _, item := range slice {
 		if strings.EqualFold(item, val) {
@@ -54,6 +83,10 @@ func createResponseHandler(resp *http.Response) ([]byte, error) {
 		return body, nil
 	case "409 Conflict":
 		body, _ := ioutil.ReadAll(resp.Body)
+		nitroError, err := createNitroErrorFromRespBody(body)
+		if err == nil {
+			return body, &nitroError
+		}
 		return body, errors.New("failed: " + resp.Status + " (" + string(body) + ")")
 
 	case "207 Multi Status":
@@ -65,6 +98,10 @@ func createResponseHandler(resp *http.Response) ([]byte, error) {
 		"503 Service Unavailable", "599 Netscaler specific error":
 		body, _ := ioutil.ReadAll(resp.Body)
 		log.Println("[INFO] go-nitro: error = " + string(body))
+		nitroError, err := createNitroErrorFromRespBody(body)
+		if err == nil {
+			return body, &nitroError
+		}
 		return body, errors.New("failed: " + resp.Status + " (" + string(body) + ")")
 	default:
 		body, err := ioutil.ReadAll(resp.Body)
@@ -84,6 +121,10 @@ func deleteResponseHandler(resp *http.Response) ([]byte, error) {
 		"409 Conflict", "503 Service Unavailable", "599 Netscaler specific error":
 		body, _ := ioutil.ReadAll(resp.Body)
 		log.Println("[INFO] go-nitro: delete: error = " + string(body))
+		nitroError, err := createNitroErrorFromRespBody(body)
+		if err == nil {
+			return body, &nitroError
+		}
 		return body, errors.New("[INFO] delete failed: " + resp.Status + " (" + string(body) + ")")
 	default:
 		body, err := ioutil.ReadAll(resp.Body)
@@ -100,12 +141,20 @@ func readResponseHandler(resp *http.Response) ([]byte, error) {
 	case "404 Not Found":
 		body, _ := ioutil.ReadAll(resp.Body)
 		log.Println("[DEBUG] go-nitro: read: 404 not found")
+		nitroError, err := createNitroErrorFromRespBody(body)
+		if err == nil {
+			return body, &nitroError
+		}
 		return body, errors.New("go-nitro: read: 404 not found: ")
 	case "400 Bad Request", "401 Unauthorized", "403 Forbidden",
 		"405 Method Not Allowed", "406 Not Acceptable",
 		"409 Conflict", "503 Service Unavailable", "599 Netscaler specific error":
 		body, _ := ioutil.ReadAll(resp.Body)
 		log.Println("[INFO] go-nitro: read: error = " + string(body))
+		nitroError, err := createNitroErrorFromRespBody(body)
+		if err == nil {
+			return body, &nitroError
+		}
 		return body, errors.New("[INFO] go-nitro: failed read: " + resp.Status + " (" + string(body) + ")")
 	default:
 		body, err := ioutil.ReadAll(resp.Body)
